@@ -117,6 +117,11 @@ export default function App() {
 
   async function enableNotifications() {
     try {
+      if (!("serviceWorker" in navigator)) {
+        setMessage("❌ Este navegador no soporta Service Worker.");
+        return;
+      }
+  
       const permission = await Notification.requestPermission();
   
       if (permission !== "granted") {
@@ -132,14 +137,22 @@ export default function App() {
       }
   
       const registration = await navigator.serviceWorker.register(
-        "/firebase-messaging-sw.js"
+        "/firebase-messaging-sw.js",
+        { scope: "/" }
       );
-  
+      
+      await navigator.serviceWorker.ready;
+      
       const token = await getToken(messaging, {
         vapidKey:
-          "BGDHIEZe04GcXtvw9HxSD7peTG76e2MUkLqgihFk7kL7g3cSxSO0QBcip21Qe93eX0m1sR8D5arJ6vljcdtHHUM",
+          "BGDHlEZe04GcXtvw9HxSD7peTG76e2MUkLqgihFk7kL7g3cSxS0oQBcip21Qe93eX0m1sR8D5arJ6vljcdtHHUM",
         serviceWorkerRegistration: registration,
       });
+  
+      if (!token) {
+        setMessage("⚠️ No se pudo obtener el token.");
+        return;
+      }
   
       await addDoc(collection(db, "pushTokens"), {
         token,
@@ -149,17 +162,9 @@ export default function App() {
   
       setPushToken(token);
       setMessage("🔔 Notificaciones activadas correctamente.");
-  
-      onMessage(messaging, (payload) => {
-        setMessage(
-          "🔔 " +
-            (payload.notification?.title || "Nueva notificación") +
-            ": " +
-            (payload.notification?.body || "")
-        );
-      });
     } catch (error) {
-      setMessage("❌ Error activando notificaciones: " + error.message);
+      console.error(error);
+      setMessage("❌ Error activando notificaciones: " + (error.message || error));
     }
   }
 
