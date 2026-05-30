@@ -8,17 +8,16 @@ firebase.initializeApp({
   storageBucket: "iglesia-el-aposento-alto.firebasestorage.app",
   messagingSenderId: "813599094842",
   appId: "1:813599094842:web:85c8f1eccfdc46661b5d03",
-  measurementId: "G-4Y294Q3J7V",
 });
 
 const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
-  const title = payload.notification?.title || "Iglesia El Aposento Alto";
-  const options = {
-    body: payload.notification?.body || "Nuevo aviso pastoral",
-    icon: "/favicon.svg",
-  };
-
-  self.registration.showNotification(title, options);
+  self.registration.showNotification(
+    payload.notification?.title || "Iglesia El Aposento Alto",
+    {
+      body: payload.notification?.body || "Nuevo aviso pastoral",
+      icon: "/favicon.svg",
+    }
+  );
 });

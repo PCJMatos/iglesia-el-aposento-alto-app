@@ -118,32 +118,38 @@ export default function App() {
   async function enableNotifications() {
     try {
       const permission = await Notification.requestPermission();
-
+  
       if (permission !== "granted") {
         setMessage("⚠️ No se activaron las notificaciones.");
         return;
       }
-
+  
       const messaging = await messagingPromise;
-
+  
       if (!messaging) {
         setMessage("⚠️ Este navegador no soporta notificaciones push.");
         return;
       }
-
+  
+      const registration = await navigator.serviceWorker.register(
+        "/firebase-messaging-sw.js"
+      );
+  
       const token = await getToken(messaging, {
-        vapidKey: "PEGUE_AQUI_SU_VAPID_KEY_DE_FIREBASE",
+        vapidKey:
+          "BGDHIEZe04GcXtvw9HxSD7peTG76e2MUkLqgihFk7kL7g3cSxSO0QBcip21Qe93eX0m1sR8D5arJ6vljcdtHHUM",
+        serviceWorkerRegistration: registration,
       });
-
+  
       await addDoc(collection(db, "pushTokens"), {
         token,
         userEmail: user ? user.email : "Invitado",
         createdAt: serverTimestamp(),
       });
-
+  
       setPushToken(token);
       setMessage("🔔 Notificaciones activadas correctamente.");
-
+  
       onMessage(messaging, (payload) => {
         setMessage(
           "🔔 " +
