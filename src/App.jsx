@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { db, auth } from "./firebase";
+import { db, auth, messagingPromise } from "./firebase";
 import {
   collection,
   addDoc,
@@ -7,6 +7,8 @@ import {
   getDocs,
   deleteDoc,
   doc,
+  updateDoc,
+  increment,
 } from "firebase/firestore";
 import {
   createUserWithEmailAndPassword,
@@ -14,6 +16,7 @@ import {
   signOut,
   sendPasswordResetEmail,
 } from "firebase/auth";
+import { getToken, onMessage } from "firebase/messaging";
 
 export default function App() {
   const [email, setEmail] = useState("");
@@ -21,28 +24,56 @@ export default function App() {
 
   const [user, setUser] = useState(null);
   const [message, setMessage] = useState("");
+  const [pushToken, setPushToken] = useState("");
 
   const [prayer, setPrayer] = useState("");
+  const [privatePrayer, setPrivatePrayer] = useState("");
   const [feeling, setFeeling] = useState("");
 
   const [prayers, setPrayers] = useState([]);
+  const [privatePrayers, setPrivatePrayers] = useState([]);
   const [feelingsList, setFeelingsList] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [sermons, setSermons] = useState([]);
+  const [devotionals, setDevotionals] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [notices, setNotices] = useState([]);
+  const [donations, setDonations] = useState([]);
+  const [radioLinks, setRadioLinks] = useState([]);
+  const [chatMessages, setChatMessages] = useState([]);
+
+  const [noticeTitle, setNoticeTitle] = useState("");
+  const [noticeText, setNoticeText] = useState("");
 
   const [eventTitle, setEventTitle] = useState("");
   const [eventDate, setEventDate] = useState("");
   const [eventTime, setEventTime] = useState("");
   const [eventLocation, setEventLocation] = useState("");
   const [eventDescription, setEventDescription] = useState("");
-  const [events, setEvents] = useState([]);
 
   const [sermonTitle, setSermonTitle] = useState("");
   const [sermonSpeaker, setSermonSpeaker] = useState("");
+  const [sermonCategory, setSermonCategory] = useState("Sermón");
   const [sermonLink, setSermonLink] = useState("");
-  const [sermons, setSermons] = useState([]);
 
   const [devotionalVerse, setDevotionalVerse] = useState("");
   const [devotionalText, setDevotionalText] = useState("");
-  const [devotionals, setDevotionals] = useState([]);
+
+  const [memberName, setMemberName] = useState("");
+  const [memberPhone, setMemberPhone] = useState("");
+  const [memberAddress, setMemberAddress] = useState("");
+  const [memberBirthday, setMemberBirthday] = useState("");
+  const [memberMinistry, setMemberMinistry] = useState("");
+  const [memberRole, setMemberRole] = useState("Miembro");
+
+  const [donationTitle, setDonationTitle] = useState("");
+  const [donationLink, setDonationLink] = useState("");
+
+  const [radioTitle, setRadioTitle] = useState("");
+  const [radioLink, setRadioLink] = useState("");
+
+  const [chatGroup, setChatGroup] = useState("General");
+  const [chatText, setChatText] = useState("");
 
   async function createAccount() {
     try {
@@ -81,33 +112,91 @@ export default function App() {
   async function logout() {
     await signOut(auth);
     setUser(null);
-    setPrayers([]);
-    setFeelingsList([]);
     setMessage("Sesión cerrada.");
   }
 
-  async function savePrayer() {
-    if (!prayer.trim()) {
-      setMessage("⚠️ Escriba una petición primero.");
-      return;
+  async function enableNotifications() {
+    try {
+      const permission = await Notification.requestPermission();
+
+      if (permission !== "granted") {
+        setMessage("⚠️ No se activaron las notificaciones.");
+        return;
+      }
+
+      const messaging = await messagingPromise;
+
+      if (!messaging) {
+        setMessage("⚠️ Este navegador no soporta notificaciones push.");
+        return;
+      }
+
+      const token = await getToken(messaging, {
+        vapidKey: "PEGUE_AQUI_SU_VAPID_KEY_DE_FIREBASE",
+      });
+
+      await addDoc(collection(db, "pushTokens"), {
+        token,
+        userEmail: user ? user.email : "Invitado",
+        createdAt: serverTimestamp(),
+      });
+
+      setPushToken(token);
+      setMessage("🔔 Notificaciones activadas correctamente.");
+
+      onMessage(messaging, (payload) => {
+        setMessage(
+          "🔔 " +
+            (payload.notification?.title || "Nueva notificación") +
+            ": " +
+            (payload.notification?.body || "")
+        );
+      });
+    } catch (error) {
+      setMessage("❌ Error activando notificaciones: " + error.message);
     }
+  }
+
+  async function savePrayer() {
+    if (!prayer.trim()) return setMessage("⚠️ Escriba una petición primero.");
 
     await addDoc(collection(db, "prayerRequests"), {
       text: prayer,
       userEmail: user ? user.email : "Invitado",
       anonymous: true,
+      prayerCount: 0,
       createdAt: serverTimestamp(),
     });
 
     setPrayer("");
     setMessage("🙏 Petición enviada correctamente.");
+    loadPastorPanel();
+  }
+
+  async function prayForRequest(id) {
+    await updateDoc(doc(db, "prayerRequests", id), {
+      prayerCount: increment(1),
+    });
+    setMessage("🙏 Marcado: estoy orando por esta petición.");
+    loadPastorPanel();
+  }
+
+  async function savePrivatePrayer() {
+    if (!privatePrayer.trim()) return setMessage("⚠️ Escriba la petición privada.");
+
+    await addDoc(collection(db, "privatePrayers"), {
+      text: privatePrayer,
+      userEmail: user ? user.email : "Invitado",
+      createdAt: serverTimestamp(),
+    });
+
+    setPrivatePrayer("");
+    setMessage("🔒 Petición privada enviada al pastor.");
+    loadPastorPanel();
   }
 
   async function saveFeeling() {
-    if (!feeling.trim()) {
-      setMessage("⚠️ Escriba su sentir primero.");
-      return;
-    }
+    if (!feeling.trim()) return setMessage("⚠️ Escriba su sentir primero.");
 
     await addDoc(collection(db, "feelings"), {
       text: feeling,
@@ -118,12 +207,29 @@ export default function App() {
 
     setFeeling("");
     setMessage("🗣️ Comentario enviado correctamente.");
+    loadPastorPanel();
+  }
+
+  async function saveNotice() {
+    if (!noticeTitle.trim() || !noticeText.trim()) {
+      return setMessage("⚠️ Complete título y mensaje del aviso.");
+    }
+
+    await addDoc(collection(db, "notices"), {
+      title: noticeTitle,
+      text: noticeText,
+      createdAt: serverTimestamp(),
+    });
+
+    setNoticeTitle("");
+    setNoticeText("");
+    setMessage("📢 Aviso publicado correctamente.");
+    loadPastorPanel();
   }
 
   async function saveEvent() {
     if (!eventTitle || !eventDate || !eventTime) {
-      setMessage("⚠️ Complete título, fecha y hora del evento.");
-      return;
+      return setMessage("⚠️ Complete título, fecha y hora del evento.");
     }
 
     await addDoc(collection(db, "events"), {
@@ -146,19 +252,20 @@ export default function App() {
 
   async function saveSermon() {
     if (!sermonTitle || !sermonLink) {
-      setMessage("⚠️ Complete título y enlace del sermón.");
-      return;
+      return setMessage("⚠️ Complete título y enlace del sermón.");
     }
 
     await addDoc(collection(db, "sermons"), {
       title: sermonTitle,
       speaker: sermonSpeaker,
+      category: sermonCategory,
       link: sermonLink,
       createdAt: serverTimestamp(),
     });
 
     setSermonTitle("");
     setSermonSpeaker("");
+    setSermonCategory("Sermón");
     setSermonLink("");
     setMessage("🎥 Sermón guardado correctamente.");
     loadPastorPanel();
@@ -166,8 +273,7 @@ export default function App() {
 
   async function saveDevotional() {
     if (!devotionalVerse || !devotionalText) {
-      setMessage("⚠️ Complete versículo y reflexión.");
-      return;
+      return setMessage("⚠️ Complete versículo y reflexión.");
     }
 
     await addDoc(collection(db, "devotionals"), {
@@ -182,18 +288,103 @@ export default function App() {
     loadPastorPanel();
   }
 
+  async function saveMember() {
+    if (!memberName.trim()) return setMessage("⚠️ Escriba el nombre del miembro.");
+
+    await addDoc(collection(db, "members"), {
+      name: memberName,
+      phone: memberPhone,
+      address: memberAddress,
+      birthday: memberBirthday,
+      ministry: memberMinistry,
+      role: memberRole,
+      email: user ? user.email : "",
+      createdAt: serverTimestamp(),
+    });
+
+    setMemberName("");
+    setMemberPhone("");
+    setMemberAddress("");
+    setMemberBirthday("");
+    setMemberMinistry("");
+    setMemberRole("Miembro");
+    setMessage("👥 Miembro guardado correctamente.");
+    loadPastorPanel();
+  }
+
+  async function saveDonation() {
+    if (!donationTitle || !donationLink) {
+      return setMessage("⚠️ Complete nombre y enlace de donación.");
+    }
+
+    await addDoc(collection(db, "donations"), {
+      title: donationTitle,
+      link: donationLink,
+      createdAt: serverTimestamp(),
+    });
+
+    setDonationTitle("");
+    setDonationLink("");
+    setMessage("💳 Enlace de donación guardado.");
+    loadPastorPanel();
+  }
+
+  async function saveRadio() {
+    if (!radioTitle || !radioLink) {
+      return setMessage("⚠️ Complete título y enlace de radio.");
+    }
+
+    await addDoc(collection(db, "radioLinks"), {
+      title: radioTitle,
+      link: radioLink,
+      createdAt: serverTimestamp(),
+    });
+
+    setRadioTitle("");
+    setRadioLink("");
+    setMessage("📻 Radio guardada.");
+    loadPastorPanel();
+  }
+
+  async function saveChatMessage() {
+    if (!chatText.trim()) return setMessage("⚠️ Escriba un mensaje.");
+
+    await addDoc(collection(db, "chatMessages"), {
+      group: chatGroup,
+      text: chatText,
+      userEmail: user ? user.email : "Invitado",
+      createdAt: serverTimestamp(),
+    });
+
+    setChatText("");
+    setMessage("💬 Mensaje enviado.");
+    loadPastorPanel();
+  }
+
   async function loadPastorPanel() {
     const prayersSnapshot = await getDocs(collection(db, "prayerRequests"));
     const feelingsSnapshot = await getDocs(collection(db, "feelings"));
+    const privateSnapshot = await getDocs(collection(db, "privatePrayers"));
     const eventsSnapshot = await getDocs(collection(db, "events"));
     const sermonsSnapshot = await getDocs(collection(db, "sermons"));
     const devotionalsSnapshot = await getDocs(collection(db, "devotionals"));
+    const membersSnapshot = await getDocs(collection(db, "members"));
+    const noticesSnapshot = await getDocs(collection(db, "notices"));
+    const donationsSnapshot = await getDocs(collection(db, "donations"));
+    const radioSnapshot = await getDocs(collection(db, "radioLinks"));
+    const chatSnapshot = await getDocs(collection(db, "chatMessages"));
 
     setPrayers(prayersSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
     setFeelingsList(feelingsSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+    setPrivatePrayers(privateSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
     setEvents(eventsSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
     setSermons(sermonsSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
     setDevotionals(devotionalsSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+    setMembers(membersSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+    setNotices(noticesSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+    setDonations(donationsSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+    setRadioLinks(radioSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
+    setChatMessages(chatSnapshot.docs.map((item) => ({ id: item.id, ...item.data() })));
 
     setMessage("📋 Panel pastoral cargado correctamente.");
   }
@@ -218,12 +409,10 @@ export default function App() {
 
       <div style={card}>
         <h2>🔐 Login de Miembros</h2>
-
         {!user ? (
           <>
             <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Correo electrónico" style={input} />
             <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Contraseña" type="password" style={input} />
-
             <button onClick={login} style={buttonOrange}>Entrar</button>
             <button onClick={resetPassword} style={buttonGray}>🔑 Olvidé mi contraseña</button>
             <button onClick={createAccount} style={buttonGreen}>Crear Cuenta</button>
@@ -233,14 +422,30 @@ export default function App() {
             <p>Sesión iniciada como: <strong>{user.email}</strong></p>
             <button onClick={logout} style={buttonGray}>Cerrar Sesión</button>
             <button onClick={loadPastorPanel} style={buttonGreen}>📋 Abrir Panel Pastoral</button>
+            <button onClick={enableNotifications} style={buttonBlue}>🔔 Activar Notificaciones</button>
+            {pushToken && <p style={{ fontSize: "12px" }}>Token guardado ✅</p>}
           </>
         )}
       </div>
 
+      <Section title="📢 Avisos Pastorales" items={notices} empty="No hay avisos todavía." render={(item) => (
+        <div style={noticeItem}>
+          <h3>{item.title}</h3>
+          <p>{item.text}</p>
+          <small>{formatDate(item.createdAt)}</small>
+        </div>
+      )} />
+
       <div style={card}>
-        <h2>🙏 Peticiones de Oración</h2>
-        <textarea value={prayer} onChange={(e) => setPrayer(e.target.value)} placeholder="Escriba aquí su petición..." style={textarea} />
+        <h2>🙏 Peticiones de Oración Pública</h2>
+        <textarea value={prayer} onChange={(e) => setPrayer(e.target.value)} placeholder="Escriba aquí su petición pública..." style={textarea} />
         <button onClick={savePrayer} style={buttonRed}>Enviar Petición</button>
+      </div>
+
+      <div style={card}>
+        <h2>🔒 Petición Privada al Pastor</h2>
+        <textarea value={privatePrayer} onChange={(e) => setPrivatePrayer(e.target.value)} placeholder="Solo el pastor verá esta petición..." style={textarea} />
+        <button onClick={savePrivatePrayer} style={buttonGray}>Enviar Petición Privada</button>
       </div>
 
       <div style={card}>
@@ -249,43 +454,78 @@ export default function App() {
         <button onClick={saveFeeling} style={buttonBlue}>Enviar Comentario</button>
       </div>
 
-      <div style={card}>
-        <h2>📅 Próximos Eventos</h2>
-        {events.length === 0 ? <p>No hay eventos cargados todavía.</p> : events.map((item) => (
-          <div key={item.id} style={panelItem}>
-            <h3>{item.title}</h3>
-            <p><strong>Fecha:</strong> {item.date}</p>
-            <p><strong>Hora:</strong> {item.time}</p>
-            <p><strong>Lugar:</strong> {item.location}</p>
-            <p>{item.description}</p>
-          </div>
-        ))}
-      </div>
+      <Section title="🙏 Muro de Oración" items={prayers} empty="No hay peticiones públicas cargadas." render={(item) => (
+        <div style={panelItem}>
+          <p>{item.text}</p>
+          <p>🙏 Personas orando: {item.prayerCount || 0}</p>
+          <button onClick={() => prayForRequest(item.id)} style={buttonGreen}>🙏 Estoy orando</button>
+        </div>
+      )} />
 
-      <div style={card}>
-        <h2>🎥 Sermones</h2>
-        {sermons.length === 0 ? <p>No hay sermones cargados todavía.</p> : sermons.map((item) => (
-          <div key={item.id} style={panelItem}>
-            <h3>{item.title}</h3>
-            <p><strong>Predicador:</strong> {item.speaker}</p>
-            <a href={item.link} target="_blank" rel="noreferrer" style={{ color: "#38bdf8" }}>Ver sermón</a>
-          </div>
-        ))}
-      </div>
+      <Section title="📅 Calendario de Eventos" items={events} empty="No hay eventos cargados." render={(item) => (
+        <div style={panelItem}>
+          <h3>{item.title}</h3>
+          <p>{item.date} - {item.time}</p>
+          <p>{item.location}</p>
+          <p>{item.description}</p>
+        </div>
+      )} />
 
-      <div style={card}>
-        <h2>📖 Devocionales</h2>
-        {devotionals.length === 0 ? <p>No hay devocionales cargados todavía.</p> : devotionals.map((item) => (
-          <div key={item.id} style={panelItem}>
-            <h3>{item.verse}</h3>
-            <p>{item.text}</p>
-          </div>
-        ))}
-      </div>
+      <Section title="🎥 Biblioteca de Sermones" items={sermons} empty="No hay sermones cargados." render={(item) => (
+        <div style={panelItem}>
+          <h3>{item.title}</h3>
+          <p><strong>Categoría:</strong> {item.category}</p>
+          <p><strong>Predicador:</strong> {item.speaker}</p>
+          <a href={item.link} target="_blank" rel="noreferrer" style={{ color: "#38bdf8" }}>Ver sermón</a>
+        </div>
+      )} />
+
+      <Section title="📖 Devocional del Día" items={devotionals} empty="No hay devocionales cargados." render={(item) => (
+        <div style={panelItem}>
+          <h3>{item.verse}</h3>
+          <p>{item.text}</p>
+        </div>
+      )} />
+
+      <Section title="👥 Directorio de Miembros" items={members} empty="No hay miembros cargados." render={(item) => (
+        <div style={panelItem}>
+          <h3>{item.name}</h3>
+          <p>{item.phone}</p>
+          <p>{item.email}</p>
+          <p>{item.address}</p>
+          <p>{item.birthday}</p>
+          <p>{item.ministry} - {item.role}</p>
+        </div>
+      )} />
 
       {user && (
         <div style={card}>
           <h2>👨‍💼 Panel Pastoral</h2>
+
+          <h3>📢 Crear Aviso</h3>
+          <input value={noticeTitle} onChange={(e) => setNoticeTitle(e.target.value)} placeholder="Título del aviso" style={input} />
+          <textarea value={noticeText} onChange={(e) => setNoticeText(e.target.value)} placeholder="Mensaje del aviso" style={textarea} />
+          <button onClick={saveNotice} style={buttonOrange}>📢 Publicar Aviso</button>
+
+          <h3>👥 Registrar Miembro</h3>
+          <input value={memberName} onChange={(e) => setMemberName(e.target.value)} placeholder="Nombre completo" style={input} />
+          <input value={memberPhone} onChange={(e) => setMemberPhone(e.target.value)} placeholder="Teléfono" style={input} />
+          <input value={memberAddress} onChange={(e) => setMemberAddress(e.target.value)} placeholder="Dirección" style={input} />
+          <input value={memberBirthday} onChange={(e) => setMemberBirthday(e.target.value)} placeholder="Cumpleaños: MM/DD" style={input} />
+          <input value={memberMinistry} onChange={(e) => setMemberMinistry(e.target.value)} placeholder="Ministerio" style={input} />
+
+          <select value={memberRole} onChange={(e) => setMemberRole(e.target.value)} style={input}>
+            <option>Miembro</option>
+            <option>Líder</option>
+            <option>Pastor</option>
+            <option>Pastora</option>
+            <option>Diácono</option>
+            <option>Diaconisa</option>
+            <option>Maestro</option>
+            <option>Alabanza</option>
+          </select>
+
+          <button onClick={saveMember} style={buttonGreen}>👥 Guardar Miembro</button>
 
           <h3>📅 Crear Evento</h3>
           <input value={eventTitle} onChange={(e) => setEventTitle(e.target.value)} placeholder="Título del evento" style={input} />
@@ -296,154 +536,87 @@ export default function App() {
           <button onClick={saveEvent} style={buttonGreen}>Guardar Evento</button>
 
           <h3>🎥 Agregar Sermón</h3>
-          <input value={sermonTitle} onChange={(e) => setSermonTitle(e.target.value)} placeholder="Título del sermón" style={input} />
+          <input value={sermonTitle} onChange={(e) => setSermonTitle(e.target.value)} placeholder="Título" style={input} />
           <input value={sermonSpeaker} onChange={(e) => setSermonSpeaker(e.target.value)} placeholder="Predicador" style={input} />
+          <select value={sermonCategory} onChange={(e) => setSermonCategory(e.target.value)} style={input}>
+            <option>Sermón</option>
+            <option>Estudio Bíblico</option>
+            <option>Matrimonios</option>
+            <option>Jóvenes</option>
+            <option>Avivamiento</option>
+          </select>
           <input value={sermonLink} onChange={(e) => setSermonLink(e.target.value)} placeholder="Enlace YouTube/Facebook" style={input} />
           <button onClick={saveSermon} style={buttonBlue}>Guardar Sermón</button>
 
           <h3>📖 Agregar Devocional</h3>
-          <input value={devotionalVerse} onChange={(e) => setDevotionalVerse(e.target.value)} placeholder="Versículo bíblico" style={input} />
-          <textarea value={devotionalText} onChange={(e) => setDevotionalText(e.target.value)} placeholder="Reflexión devocional" style={textarea} />
+          <input value={devotionalVerse} onChange={(e) => setDevotionalVerse(e.target.value)} placeholder="Versículo RV1960" style={input} />
+          <textarea value={devotionalText} onChange={(e) => setDevotionalText(e.target.value)} placeholder="Reflexión" style={textarea} />
           <button onClick={saveDevotional} style={buttonOrange}>Guardar Devocional</button>
 
-          <h3>🙏 Peticiones Recibidas</h3>
-          {prayers.map((item) => (
-            <div key={item.id} style={panelItem}>
-              <p><strong>Usuario:</strong> {item.userEmail || "Invitado"}</p>
-              <p><strong>Petición:</strong> {item.text}</p>
-              <p><strong>Fecha:</strong> {formatDate(item.createdAt)}</p>
-              <button onClick={() => deleteItem("prayerRequests", item.id)} style={buttonRed}>🗑️ Eliminar</button>
-            </div>
-          ))}
+          <h3>💳 Agregar Donación</h3>
+          <input value={donationTitle} onChange={(e) => setDonationTitle(e.target.value)} placeholder="PayPal, CashApp, Zelle..." style={input} />
+          <input value={donationLink} onChange={(e) => setDonationLink(e.target.value)} placeholder="Enlace" style={input} />
+          <button onClick={saveDonation} style={buttonGreen}>Guardar Donación</button>
 
-          <h3>🗣️ Comentarios / Mi Sentir</h3>
-          {feelingsList.map((item) => (
-            <div key={item.id} style={panelItem}>
-              <p><strong>Usuario:</strong> {item.userEmail || "Invitado"}</p>
-              <p><strong>Comentario:</strong> {item.text}</p>
-              <p><strong>Fecha:</strong> {formatDate(item.createdAt)}</p>
-              <button onClick={() => deleteItem("feelings", item.id)} style={buttonRed}>🗑️ Eliminar</button>
-            </div>
-          ))}
+          <h3>📻 Agregar Radio</h3>
+          <input value={radioTitle} onChange={(e) => setRadioTitle(e.target.value)} placeholder="Título de radio" style={input} />
+          <input value={radioLink} onChange={(e) => setRadioLink(e.target.value)} placeholder="Enlace de radio" style={input} />
+          <button onClick={saveRadio} style={buttonBlue}>Guardar Radio</button>
 
-          <h3>📅 Eventos Administrados</h3>
-          {events.map((item) => (
-            <div key={item.id} style={panelItem}>
-              <p><strong>{item.title}</strong></p>
-              <p>{item.date} - {item.time}</p>
-              <button onClick={() => deleteItem("events", item.id)} style={buttonRed}>🗑️ Eliminar Evento</button>
-            </div>
-          ))}
-
-          <h3>🎥 Sermones Administrados</h3>
-          {sermons.map((item) => (
-            <div key={item.id} style={panelItem}>
-              <p><strong>{item.title}</strong></p>
-              <button onClick={() => deleteItem("sermons", item.id)} style={buttonRed}>🗑️ Eliminar Sermón</button>
-            </div>
-          ))}
-
-          <h3>📖 Devocionales Administrados</h3>
-          {devotionals.map((item) => (
-            <div key={item.id} style={panelItem}>
-              <p><strong>{item.verse}</strong></p>
-              <button onClick={() => deleteItem("devotionals", item.id)} style={buttonRed}>🗑️ Eliminar Devocional</button>
-            </div>
-          ))}
+          <AdminList title="🔒 Peticiones Privadas" items={privatePrayers} collectionName="privatePrayers" deleteItem={deleteItem} />
+          <AdminList title="🙏 Peticiones Públicas" items={prayers} collectionName="prayerRequests" deleteItem={deleteItem} />
+          <AdminList title="🗣️ Mi Sentir" items={feelingsList} collectionName="feelings" deleteItem={deleteItem} />
+          <AdminList title="📢 Avisos" items={notices} collectionName="notices" deleteItem={deleteItem} />
+          <AdminList title="📅 Eventos" items={events} collectionName="events" deleteItem={deleteItem} />
+          <AdminList title="🎥 Sermones" items={sermons} collectionName="sermons" deleteItem={deleteItem} />
+          <AdminList title="📖 Devocionales" items={devotionals} collectionName="devotionals" deleteItem={deleteItem} />
+          <AdminList title="👥 Miembros" items={members} collectionName="members" deleteItem={deleteItem} />
+          <AdminList title="💳 Donaciones" items={donations} collectionName="donations" deleteItem={deleteItem} />
+          <AdminList title="📻 Radio" items={radioLinks} collectionName="radioLinks" deleteItem={deleteItem} />
+          <AdminList title="💬 Chat" items={chatMessages} collectionName="chatMessages" deleteItem={deleteItem} />
         </div>
       )}
     </div>
   );
 }
 
-const page = {
-  background: "#0f172a",
-  color: "white",
-  minHeight: "100vh",
-  padding: "30px",
-  fontFamily: "Arial",
-};
+function Section({ title, items, empty, render }) {
+  return (
+    <div style={card}>
+      <h2>{title}</h2>
+      {items.length === 0 ? <p>{empty}</p> : items.map((item) => (
+        <div key={item.id}>{render(item)}</div>
+      ))}
+    </div>
+  );
+}
 
-const title = {
-  color: "#f59e0b",
-  textAlign: "center",
-  fontSize: "42px",
-};
+function AdminList({ title, items, collectionName, deleteItem }) {
+  return (
+    <>
+      <h3>{title}</h3>
+      {items.map((item) => (
+        <div key={item.id} style={panelItem}>
+          <p><strong>Contenido:</strong> {item.text || item.title || item.name || item.verse || "Registro guardado"}</p>
+          <p><strong>Usuario:</strong> {item.userEmail || item.email || "No disponible"}</p>
+          <button onClick={() => deleteItem(collectionName, item.id)} style={buttonRed}>🗑️ Eliminar</button>
+        </div>
+      ))}
+    </>
+  );
+}
 
-const subtitle = {
-  textAlign: "center",
-  fontSize: "20px",
-};
-
-const messageStyle = {
-  textAlign: "center",
-  color: "#22c55e",
-  fontSize: "18px",
-  fontWeight: "bold",
-};
-
-const card = {
-  background: "#1e293b",
-  padding: "20px",
-  borderRadius: "15px",
-  maxWidth: "750px",
-  margin: "20px auto",
-};
-
-const input = {
-  width: "100%",
-  padding: "12px",
-  marginBottom: "10px",
-  fontSize: "16px",
-};
-
-const textarea = {
-  width: "100%",
-  height: "120px",
-  padding: "10px",
-  marginBottom: "10px",
-  fontSize: "16px",
-};
-
-const buttonOrange = {
-  width: "100%",
-  padding: "12px",
-  background: "#f59e0b",
-  color: "black",
-  border: "none",
-  borderRadius: "10px",
-  marginBottom: "10px",
-  fontSize: "16px",
-  cursor: "pointer",
-};
-
-const buttonGreen = {
-  ...buttonOrange,
-  background: "#22c55e",
-};
-
-const buttonRed = {
-  ...buttonOrange,
-  background: "#dc2626",
-  color: "white",
-};
-
-const buttonBlue = {
-  ...buttonOrange,
-  background: "#2563eb",
-  color: "white",
-};
-
-const buttonGray = {
-  ...buttonOrange,
-  background: "#475569",
-  color: "white",
-};
-
-const panelItem = {
-  background: "#0f172a",
-  padding: "12px",
-  borderRadius: "10px",
-  marginBottom: "12px",
-  border: "1px solid #334155",
-};
+const page = { background: "#0f172a", color: "white", minHeight: "100vh", padding: "30px", fontFamily: "Arial" };
+const title = { color: "#f59e0b", textAlign: "center", fontSize: "42px" };
+const subtitle = { textAlign: "center", fontSize: "20px" };
+const messageStyle = { textAlign: "center", color: "#22c55e", fontSize: "18px", fontWeight: "bold" };
+const card = { background: "#1e293b", padding: "20px", borderRadius: "15px", maxWidth: "750px", margin: "20px auto" };
+const input = { width: "100%", padding: "12px", marginBottom: "10px", fontSize: "16px" };
+const textarea = { width: "100%", height: "120px", padding: "10px", marginBottom: "10px", fontSize: "16px" };
+const buttonOrange = { width: "100%", padding: "12px", background: "#f59e0b", color: "black", border: "none", borderRadius: "10px", marginBottom: "10px", fontSize: "16px", cursor: "pointer" };
+const buttonGreen = { ...buttonOrange, background: "#22c55e" };
+const buttonRed = { ...buttonOrange, background: "#dc2626", color: "white" };
+const buttonBlue = { ...buttonOrange, background: "#2563eb", color: "white" };
+const buttonGray = { ...buttonOrange, background: "#475569", color: "white" };
+const panelItem = { background: "#0f172a", padding: "12px", borderRadius: "10px", marginBottom: "12px", border: "1px solid #334155" };
+const noticeItem = { background: "#78350f", padding: "15px", borderRadius: "12px", marginBottom: "12px", border: "1px solid #f59e0b" };
