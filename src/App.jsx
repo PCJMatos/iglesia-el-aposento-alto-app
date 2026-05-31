@@ -16,12 +16,11 @@ import {
   signOut,
   sendPasswordResetEmail,
 } from "firebase/auth";
-import { getToken, onMessage } from "firebase/messaging";
+import { getToken } from "firebase/messaging";
 
 export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
   const [user, setUser] = useState(null);
   const [message, setMessage] = useState("");
   const [pushToken, setPushToken] = useState("");
@@ -121,45 +120,45 @@ export default function App() {
         setMessage("❌ Este navegador no soporta Service Worker.");
         return;
       }
-  
+
       const permission = await Notification.requestPermission();
-  
+
       if (permission !== "granted") {
         setMessage("⚠️ No se activaron las notificaciones.");
         return;
       }
-  
+
       const messaging = await messagingPromise;
-  
+
       if (!messaging) {
         setMessage("⚠️ Este navegador no soporta notificaciones push.");
         return;
       }
-  
+
       const registration = await navigator.serviceWorker.register(
         "/firebase-messaging-sw.js",
         { scope: "/" }
       );
-      
+
       await navigator.serviceWorker.ready;
-      
+
       const token = await getToken(messaging, {
         vapidKey:
           "BGDHlEZe04GcXtvw9HxSD7peTG76e2MUkLqgihFk7kL7g3cSxS0oQBcip21Qe93eX0m1sR8D5arJ6vljcdtHHUM",
         serviceWorkerRegistration: registration,
       });
-  
+
       if (!token) {
         setMessage("⚠️ No se pudo obtener el token.");
         return;
       }
-  
+
       await addDoc(collection(db, "pushTokens"), {
         token,
         userEmail: user ? user.email : "Invitado",
         createdAt: serverTimestamp(),
       });
-  
+
       setPushToken(token);
       setMessage("🔔 Notificaciones activadas correctamente.");
     } catch (error) {
@@ -188,6 +187,7 @@ export default function App() {
     await updateDoc(doc(db, "prayerRequests", id), {
       prayerCount: increment(1),
     });
+
     setMessage("🙏 Marcado: estoy orando por esta petición.");
     loadPastorPanel();
   }
@@ -420,6 +420,7 @@ export default function App() {
 
       <div style={card}>
         <h2>🔐 Login de Miembros</h2>
+
         {!user ? (
           <>
             <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Correo electrónico" style={input} />
@@ -516,7 +517,7 @@ export default function App() {
           <h3>📢 Crear Aviso</h3>
           <input value={noticeTitle} onChange={(e) => setNoticeTitle(e.target.value)} placeholder="Título del aviso" style={input} />
           <textarea value={noticeText} onChange={(e) => setNoticeText(e.target.value)} placeholder="Mensaje del aviso" style={textarea} />
-          <button onClick={saveNotice} style={buttonOrange}>📢 Publicar Aviso</button>
+          <button onClick={saveNotice} style={buttonOrange}>📢 Publicar Aviso General</button>
 
           <h3>👥 Registrar Miembro</h3>
           <input value={memberName} onChange={(e) => setMemberName(e.target.value)} placeholder="Nombre completo" style={input} />
